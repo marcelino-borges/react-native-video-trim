@@ -9,7 +9,6 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
   // MARK: instance private props
   private var isShowing = false
   private var vc: VideoTrimmerViewController?
-  private var isVideoType = true
   private var outputFile: URL?
   private var editorConfig: NSDictionary?
   
@@ -260,7 +259,7 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
     }
   }
   
-  private func trim(viewController: VideoTrimmerViewController, inputFile: URL, videoDuration: Double, startTime: Double, endTime: Double) {
+  private func trim(viewController: VideoTrimmerViewController, inputFile: URL, videoDuration: Double, startTime: Double, endTime: Double, isVideoType: Bool) {
     vc?.pausePlayer()
     
     let timestamp = Int(Date().timeIntervalSince1970)
@@ -371,7 +370,7 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
         let eventPayload: [String: Any] = ["outputPath": self.outputFile!.absoluteString, "startTime": (startTime * 1000).rounded(), "endTime": (endTime * 1000).rounded(), "duration": (videoDuration * 1000).rounded()]
         self.emitEventToJS("onFinishTrimming", eventData: eventPayload)
         
-        if (self.saveToPhoto && self.isVideoType) {
+        if (self.saveToPhoto && isVideoType) {
           PHPhotoLibrary.requestAuthorization { status in
             guard status == .authorized else {
               self.onError(message: "Permission to access Photo Library is not granted", code: .noPhotoPermission)
@@ -755,9 +754,11 @@ extension VideoTrim {
         }
       }
       
+      let isVideoType = (config["type"] as? String ?? "video") == "video"
+      
       vc.saveBtnClicked = {(selectedRange: CMTimeRange) in
         if !self.enableSaveDialog {
-          self.trim(viewController: vc,inputFile: destPath, videoDuration: self.vc!.asset!.duration.seconds, startTime: selectedRange.start.seconds, endTime: selectedRange.end.seconds)
+          self.trim(viewController: vc,inputFile: destPath, videoDuration: self.vc!.asset!.duration.seconds, startTime: selectedRange.start.seconds, endTime: selectedRange.end.seconds, isVideoType: isVideoType)
           return
         }
         
@@ -767,7 +768,7 @@ extension VideoTrim {
         
         // Create OK button with action handler
         let ok = UIAlertAction(title: self.saveDialogConfirmText, style: .default, handler: { (action) -> Void in
-          self.trim(viewController: vc,inputFile: destPath, videoDuration: vc.asset!.duration.seconds, startTime: selectedRange.start.seconds, endTime: selectedRange.end.seconds)
+          self.trim(viewController: vc,inputFile: destPath, videoDuration: vc.asset!.duration.seconds, startTime: selectedRange.start.seconds, endTime: selectedRange.end.seconds, isVideoType: isVideoType)
         })
         
         // Create Cancel button with action handlder
@@ -798,7 +799,7 @@ extension VideoTrim {
           // otherwise it may run too fast for local file and autoplay looks weird
           let assetLoader = AssetLoader()
           assetLoader.delegate = self
-          assetLoader.loadAsset(url: destPath, isVideoType: self.isVideoType)
+          assetLoader.loadAsset(url: destPath, isVideoType: isVideoType)
         })
       }
     }
