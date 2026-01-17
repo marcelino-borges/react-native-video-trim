@@ -3,7 +3,6 @@ import Photos
 import ffmpegkit
 
 let FILE_PREFIX = "trimmedVideo"
-let BEFORE_TRIM_PREFIX = "beforeTrim"
 
 @objc(VideoTrimSwift)
 public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDelegate {
@@ -343,12 +342,12 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
     
     cmds.append(contentsOf: [
       "-i",
-      "\(inputFile)",
+      inputFile.path,
       "-c",
       "copy",
       "-metadata",
       "creation_time=\(dateTime)",
-      outputFile!.absoluteString
+      outputFile!.path
     ])
     
     print("Command: ", cmds.joined(separator: " "))
@@ -465,13 +464,7 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
   // New Arch
   @objc(trim:url:config:)
   public func _trim(inputFile: String, config: NSDictionary, completion: @escaping ([String: Any]) -> Void) {
-    var destPath: URL?
-    
-    if inputFile.hasPrefix("http://") || inputFile.hasPrefix("https://") {
-      destPath = URL(string: inputFile)
-    } else {
-      destPath = renameFile(at: URL(string: inputFile)!, newName: BEFORE_TRIM_PREFIX)
-    }
+    let destPath = URL(string: inputFile)
     
     guard let destPath = destPath else {
       let result = [
@@ -511,12 +504,12 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
     
     cmds.append(contentsOf: [
       "-i",
-      "\(destPath.absoluteString)",
+      destPath.path,
       "-c",
       "copy",
       "-metadata",
       "creation_time=\(dateTime)",
-      outputFile.absoluteString
+      outputFile.path
     ])
     
     print("Command: ", cmds.joined(separator: " "))
@@ -706,40 +699,6 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
     ]
     self.emitEventToJS("onError", eventData: eventPayload)
   }
-  
-  private func renameFile(at url: URL, newName: String) -> URL? {
-    let fileManager = FileManager.default
-    
-    // Get the directory of the existing file
-    let directory = url.deletingLastPathComponent()
-    
-    // Get the file extension
-    let fileExtension = url.pathExtension
-    
-    // Create the new file URL with the new name and the same extension
-    let newFileURL = directory.appendingPathComponent(newName).appendingPathExtension(fileExtension)
-    
-    // Check if a file with the new name already exists
-    if fileManager.fileExists(atPath: newFileURL.path) {
-      do {
-        // If the file exists, remove it first to avoid conflicts
-        try fileManager.removeItem(at: newFileURL)
-      } catch {
-        print("Error removing existing file: \(error)")
-        return nil
-      }
-    }
-    
-    do {
-      // Rename (move) the file
-      try fileManager.moveItem(at: url, to: newFileURL)
-      print("File renamed successfully to \(newFileURL.absoluteString)")
-      return newFileURL
-    } catch {
-      print("Error renaming file: \(error)")
-      return nil
-    }
-  }
 }
 
 // MARK: @objc instance methods
@@ -751,63 +710,10 @@ extension VideoTrim {
       return
     }
     editorConfig = config
+    print("Show editor called with URI: \(uri)")
     
-    //
-    //    saveToPhoto = config["saveToPhoto"] as? Bool ?? false
-    //
-    //    removeAfterSavedToPhoto = config["removeAfterSavedToPhoto"] as? Bool ?? false
-    //    removeAfterFailedToSavePhoto = config["removeAfterFailedToSavePhoto"] as? Bool ?? false
-    //    removeAfterSavedToDocuments = config["removeAfterSavedToDocuments"] as? Bool ?? false
-    //    removeAfterFailedToSaveDocuments = config["removeAfterFailedToSaveDocuments"] as? Bool ?? false
-    //    removeAfterShared = config["removeAfterShared"] as? Bool ?? false
-    //    removeAfterFailedToShare = config["removeAfterFailedToShare"] as? Bool ?? false
-    //
-    //    enableCancelDialog = config["enableCancelDialog"] as? Bool ?? true
-    //    cancelDialogTitle = config["cancelDialogTitle"] as? String ?? "Warning!"
-    //    cancelDialogMessage = config["cancelDialogMessage"] as? String ?? "Are you sure want to cancel?"
-    //    cancelDialogCancelText = config["cancelDialogCancelText"] as? String ?? "Close"
-    //    cancelDialogConfirmText = config["cancelDialogConfirmText"] as? String ?? "Proceed"
-    //
-    //    enableSaveDialog = config["enableSaveDialog"] as? Bool ?? true
-    //    saveDialogTitle = config["saveDialogTitle"] as? String ?? "Confirmation!"
-    //    saveDialogMessage = config["saveDialogMessage"] as? String ?? "Are you sure want to save?"
-    //    saveDialogCancelText = config["saveDialogCancelText"] as? String ?? "Close"
-    //    saveDialogConfirmText = config["saveDialogConfirmText"] as? String ?? "Proceed"
-    //    trimmingText = config["trimmingText"] as? String ?? "Trimming video..."
-    //    fullScreenModalIOS = config["fullScreenModalIOS"] as? Bool ?? false
-    //    isVideoType = (config["type"] as? String ?? "video") == "video"
-    //    outputExt = config["outputExt"] as? String ?? "mp4"
-    //    openDocumentsOnFinish = config["openDocumentsOnFinish"] as? Bool ?? false
-    //    openShareSheetOnFinish = config["openShareSheetOnFinish"] as? Bool ?? false
-    //
-    //    closeWhenFinish = config["closeWhenFinish"] as? Bool ?? true
-    //    enableCancelTrimming = config["enableCancelTrimming"] as? Bool ?? true
-    //    cancelTrimmingButtonText = config["cancelTrimmingButtonText"] as? String ?? "Cancel"
-    //    enableCancelTrimmingDialog = config["enableCancelTrimmingDialog"] as? Bool ?? true
-    //    cancelTrimmingDialogTitle = config["cancelTrimmingDialogTitle"] as? String ?? "Warning!"
-    //    cancelTrimmingDialogMessage = config["cancelTrimmingDialogMessage"] as? String ?? "Are you sure want to cancel trimming?"
-    //    cancelTrimmingDialogCancelText = config["cancelTrimmingDialogCancelText"] as? String ?? "Close"
-    //    cancelTrimmingDialogConfirmText = config["cancelTrimmingDialogConfirmText"] as? String ?? "Proceed"
-    //    alertOnFailToLoad = config["alertOnFailToLoad"] as? Bool ?? true
-    //    alertOnFailTitle = config["alertOnFailTitle"] as? String ?? "Error"
-    //    alertOnFailMessage = config["alertOnFailMessage"] as? String ?? "Fail to load media. Possibly invalid file or no network connection"
-    //    alertOnFailCloseText = config["alertOnFailCloseText"] as? String ?? "Close"
-    //
-    //    if let cancelBtnText = config["cancelButtonText"] as? String, !cancelBtnText.isEmpty {
-    //      self.cancelButtonText = cancelBtnText
-    //    }
-    //
-    //    if let saveButtonText = config["saveButtonText"] as? String, !saveButtonText.isEmpty {
-    //      self.saveButtonText = saveButtonText
-    //    }
-    
-    var destPath: URL?
-    
-    if uri.hasPrefix("http://") || uri.hasPrefix("https://") {
-      destPath = URL(string: uri)
-    } else {
-      destPath = renameFile(at: URL(string: uri)!, newName: BEFORE_TRIM_PREFIX)
-    }
+    let destPath = URL(string: uri)
+    print("Destination Path: \(destPath!.absoluteString), path: \(destPath!.path)")
     
     guard let destPath = destPath else { return }
     
@@ -978,7 +884,7 @@ extension VideoTrim {
       let directoryContents = try FileManager.default.contentsOfDirectory(at: documentsDirectory, includingPropertiesForKeys: nil)
       
       for fileURL in directoryContents {
-        if fileURL.lastPathComponent.starts(with: FILE_PREFIX) || fileURL.lastPathComponent.starts(with: BEFORE_TRIM_PREFIX) {
+        if fileURL.lastPathComponent.starts(with: FILE_PREFIX) {
           files.append(fileURL)
         }
       }
