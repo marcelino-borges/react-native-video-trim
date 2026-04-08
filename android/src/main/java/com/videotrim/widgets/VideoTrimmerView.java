@@ -21,6 +21,7 @@ import android.util.AttributeSet;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -104,6 +105,13 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
   private long zoomedInRangeDuration = 0;
   private boolean isTrimmingLeading = false;
 
+  // range drag
+  private boolean isRangeDragging = false;
+  private float rangeDragInitialRawX = 0;
+  private long rangeDragInitialStartTime = 0;
+  private long rangeDragInitialEndTime = 0;
+  private GestureDetector rangeDragGestureDetector;
+
   // thumbnail caching for zoom functionality
   private final java.util.List<ImageView> cachedFullViewThumbnails = new java.util.ArrayList<>();
   private volatile boolean isGeneratingThumbnails = false;
@@ -155,7 +163,22 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
     initializeViews();
     configure(config);
     setUpListeners();
+    initRangeDragDetector();
     setProgressIndicatorTouchListener();
+  }
+
+  private void initRangeDragDetector() {
+    rangeDragGestureDetector = new GestureDetector(mContext, new GestureDetector.SimpleOnGestureListener() {
+      @Override
+      public void onLongPress(MotionEvent e) {
+        isRangeDragging = true;
+        rangeDragInitialRawX = e.getRawX();
+        rangeDragInitialStartTime = startTime;
+        rangeDragInitialEndTime = endTime;
+        playHapticFeedback(true);
+        fadeOutProgressIndicator();
+      }
+    });
   }
 
   private void initializeViews() {
@@ -664,17 +687,29 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
 
   private void setProgressIndicatorTouchListener() {
     trimmerContainerBg.setOnTouchListener((view, event) -> {
+      rangeDragGestureDetector.onTouchEvent(event);
+
       switch (event.getAction()) {
         case MotionEvent.ACTION_DOWN:
+          isRangeDragging = false;
           didClampWhilePanning = false;
           onMediaPause();
           onTrimmerContainerPanned(event);
           playHapticFeedback(true);
           break;
         case MotionEvent.ACTION_MOVE:
-          onTrimmerContainerPanned(event);
+          if (isRangeDragging) {
+            onRangeDrag(event);
+          } else {
+            onTrimmerContainerPanned(event);
+          }
           break;
         case MotionEvent.ACTION_UP:
+          if (isRangeDragging) {
+            isRangeDragging = false;
+            fadeInProgressIndicator();
+            updateCurrentTime(true);
+          }
           view.performClick();
           break;
         default:
@@ -728,6 +763,45 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
     }
 
     seekTo(newVideoPosition, false);
+  }
+
+  private void onRangeDrag(MotionEvent event) {
+    float deltaX = event.getRawX() - rangeDragInitialRawX;
+    float containerWidth = trimmerContainerBg.getWidth();
+    if (containerWidth <= 0) return;
+
+    long rangeDuration = rangeDragInitialEndTime - rangeDragInitialStartTime;
+    long deltaTime;
+    if (isZoomedIn) {
+      deltaTime = (long) (deltaX / containerWidth * zoomedInRangeDuration);
+    } else {
+      deltaTime = (long) (deltaX / containerWidth * mDuration);
+    }
+
+    long newStart = rangeDragInitialStartTime + deltaTime;
+    long newEnd = newStart + rangeDuration;
+
+    boolean didClamp = false;
+    if (newStart < 0) {
+      newStart = 0;
+      newEnd = rangeDuration;
+      didClamp = true;
+    }
+    if (newEnd > mDuration) {
+      newEnd = mDuration;
+      newStart = newEnd - rangeDuration;
+      didClamp = true;
+    }
+
+    if (didClamp && !didClampWhilePanning) {
+      playHapticFeedback(false);
+    }
+    didClampWhilePanning = didClamp;
+
+    startTime = newStart;
+    endTime = newEnd;
+    updateHandlePositions();
+    seekTo(startTime, false);
   }
 
   private void setHandleTouchListener(View handle, boolean isLeading) {

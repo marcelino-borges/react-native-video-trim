@@ -131,6 +131,20 @@ class VideoTrimmerViewController: UIViewController {
         handleTrimmingEnd(false)
     }
     
+    @objc private func didBeginDraggingRange(_ sender: VideoTrimmer) {
+        handleBeforeProgressChange()
+    }
+    
+    @objc private func rangeDragChanged(_ sender: VideoTrimmer) {
+        handleProgressChanged(time: trimmer.selectedRange.start)
+    }
+    
+    @objc private func didEndDraggingRange(_ sender: VideoTrimmer) {
+        self.trimmer.progress = trimmer.selectedRange.start
+        updateLabels()
+        seek(to: trimmer.progress)
+    }
+    
     @objc private func didBeginScrubbing(_ sender: VideoTrimmer) {
         handleBeforeProgressChange()
     }
@@ -354,6 +368,10 @@ class VideoTrimmerViewController: UIViewController {
         trimmer.addTarget(self, action: #selector(didBeginTrimmingFromEnd(_:)), for: VideoTrimmer.didBeginTrimmingFromEnd)
         trimmer.addTarget(self, action: #selector(trailingGrabberChanged(_:)), for: VideoTrimmer.trailingGrabberChanged)
         trimmer.addTarget(self, action: #selector(didEndTrimmingFromEnd(_:)), for: VideoTrimmer.didEndTrimmingFromEnd)
+        
+        trimmer.addTarget(self, action: #selector(didBeginDraggingRange(_:)), for: VideoTrimmer.didBeginDraggingRange)
+        trimmer.addTarget(self, action: #selector(rangeDragChanged(_:)), for: VideoTrimmer.rangeDragChanged)
+        trimmer.addTarget(self, action: #selector(didEndDraggingRange(_:)), for: VideoTrimmer.didEndDraggingRange)
         trimmer.alpha = 0
         view.addSubview(trimmer)
         trimmer.translatesAutoresizingMaskIntoConstraints = false

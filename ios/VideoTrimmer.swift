@@ -26,6 +26,11 @@ import AVFoundation
     static let progressChanged = UIControl.Event(rawValue:      0b00010000 << 24)
     static let didEndScrubbing = UIControl.Event(rawValue:      0b00100000 << 24)
     
+    // events for dragging the entire selected range
+    static let didBeginDraggingRange = UIControl.Event(rawValue: 0b01000000 << 24)
+    static let rangeDragChanged = UIControl.Event(rawValue:      0b10000000 << 24)
+    static let didEndDraggingRange = UIControl.Event(rawValue:   1 << 25)
+    
     private struct Thumbnail {
         let uuid = UUID()
         let imageView: UIImageView
@@ -249,6 +254,12 @@ import AVFoundation
     private (set) var trailingGestureRecognizer: UILongPressGestureRecognizer!
     private (set) var progressGestureRecognizer: UILongPressGestureRecognizer!
     private (set) var thumbnailInteractionGestureRecognizer: UILongPressGestureRecognizer!
+    private (set) var rangeDragGestureRecognizer: UILongPressGestureRecognizer!
+    
+    // range drag state
+    private(set) var isDraggingRange = false
+    private var rangeDragInitialRange: CMTimeRange = .zero
+    private var rangeDragInitialLocationX: CGFloat = 0
     
     // private stuff
     private var grabberOffset = CGFloat(0)
@@ -369,11 +380,18 @@ import AVFoundation
         progressGestureRecognizer.require(toFail: trailingGestureRecognizer)
         progressIndicatorControl.addGestureRecognizer(progressGestureRecognizer)
         
+        // Range drag: platform-default long press (0.5s hold, 10pt allowable movement)
+        rangeDragGestureRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(rangeDragPanned(_:)))
+        rangeDragGestureRecognizer.require(toFail: leadingGestureRecognizer)
+        rangeDragGestureRecognizer.require(toFail: trailingGestureRecognizer)
+        thumbView.addGestureRecognizer(rangeDragGestureRecognizer)
+        
         thumbnailInteractionGestureRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(thumbnailPanned(_:)))
         thumbnailInteractionGestureRecognizer.allowableMovement = CGFloat.greatestFiniteMagnitude
         thumbnailInteractionGestureRecognizer.minimumPressDuration = 0
         thumbnailInteractionGestureRecognizer.require(toFail: leadingGestureRecognizer)
         thumbnailInteractionGestureRecognizer.require(toFail: trailingGestureRecognizer)
+        thumbnailInteractionGestureRecognizer.require(toFail: rangeDragGestureRecognizer)
         thumbView.addGestureRecognizer(thumbnailInteractionGestureRecognizer)
     }
     
@@ -583,9 +601,10 @@ import AVFoundation
             setNeedsLayout()
             
         case .hiddenOnlyWhenTrimming:
-            progressIndicator.alpha = (trimmingState == .none ? 1 : 0)
-            progressIndicatorControl.isUserInteractionEnabled = (trimmingState == .none)
-            if trimmingState == .none {
+            let shouldShow = trimmingState == .none && !isDraggingRange
+            progressIndicator.alpha = (shouldShow ? 1 : 0)
+            progressIndicatorControl.isUserInteractionEnabled = shouldShow
+            if shouldShow {
                 setNeedsLayout()
                 if UIView.inheritedAnimationDuration > 0 {
                     UIView.performWithoutAnimation {
@@ -771,6 +790,86 @@ import AVFoundation
             
         case .cancelled:
             stopPanning()
+            
+        case .possible, .failed:
+            break
+            
+        @unknown default:
+            break
+        }
+    }
+    
+    
+    @objc private func rangeDragPanned(_ sender: UILongPressGestureRecognizer) {
+        switch sender.state {
+        case .began:
+            isDraggingRange = true
+            rangeDragInitialRange = selectedRange
+            rangeDragInitialLocationX = sender.location(in: self).x
+            didClampWhilePanning = false
+            
+            if enableHapticFeedback {
+                UISelectionFeedbackGenerator().selectionChanged()
+                impactFeedbackGenerator = UIImpactFeedbackGenerator(style: .heavy)
+                impactFeedbackGenerator?.prepare()
+            }
+            
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: {
+                self.updateProgressIndicator()
+            })
+            sendActions(for: Self.didBeginDraggingRange)
+            
+        case .changed:
+            let currentX = sender.location(in: self).x
+            let deltaX = currentX - rangeDragInitialLocationX
+            let inset = thumbView.chevronWidth + horizontalInset
+            let availableWidth = bounds.width - inset * 2
+            let visibleDurationInSeconds = CGFloat(visibleRange.duration.seconds)
+            guard availableWidth > 0 && visibleDurationInSeconds > 0 else { return }
+            
+            let deltaTime = CMTime(
+                seconds: Double(deltaX / availableWidth) * Double(visibleDurationInSeconds),
+                preferredTimescale: 600
+            )
+            let duration = rangeDragInitialRange.duration
+            var newStart = CMTimeAdd(rangeDragInitialRange.start, deltaTime)
+            var newEnd = CMTimeAdd(newStart, duration)
+            
+            var didClamp = false
+            if CMTimeCompare(newStart, range.start) == -1 {
+                newStart = range.start
+                newEnd = CMTimeAdd(newStart, duration)
+                didClamp = true
+            }
+            if CMTimeCompare(newEnd, range.end) == 1 {
+                newEnd = range.end
+                newStart = CMTimeSubtract(newEnd, duration)
+                didClamp = true
+            }
+            
+            if didClamp && !didClampWhilePanning {
+                impactFeedbackGenerator?.impactOccurred()
+            }
+            didClampWhilePanning = didClamp
+            
+            selectedRange = CMTimeRange(start: newStart, end: newEnd)
+            setNeedsLayout()
+            sendActions(for: Self.rangeDragChanged)
+            
+        case .ended:
+            isDraggingRange = false
+            impactFeedbackGenerator = nil
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: {
+                self.updateProgressIndicator()
+            })
+            sendActions(for: Self.didEndDraggingRange)
+            
+        case .cancelled:
+            isDraggingRange = false
+            impactFeedbackGenerator = nil
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: {
+                self.updateProgressIndicator()
+            })
             
         case .possible, .failed:
             break
