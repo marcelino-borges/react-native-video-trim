@@ -357,68 +357,70 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
     self.emitEventToJS("onLog", eventData: eventPayload)
     
     ffmpegSession = FFmpegKit.execute(withArgumentsAsync: cmds, withCompleteCallback: { session in
-      
-      // always hide progressAlert
-      DispatchQueue.main.async {
-        progressAlert.dismiss(animated: true)
-      }
-      
+
       let state = session?.getState()
       let returnCode = session?.getReturnCode()
-      
-      if ReturnCode.isSuccess(returnCode) {
-        let eventPayload: [String: Any] = ["outputPath": self.outputFile!.absoluteString, "startTime": (startTime * 1000).rounded(), "endTime": (endTime * 1000).rounded(), "duration": (videoDuration * 1000).rounded()]
-        self.emitEventToJS("onFinishTrimming", eventData: eventPayload)
-        
-        if (self.saveToPhoto && isVideoType) {
-          PHPhotoLibrary.requestAuthorization { status in
-            guard status == .authorized else {
-              self.onError(message: "Permission to access Photo Library is not granted", code: .noPhotoPermission)
-              return
-            }
-            
-            PHPhotoLibrary.shared().performChanges({
-              let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: self.outputFile!)
-              request?.creationDate = Date()
-            }) { success, error in
-              if success {
-                print("Edited video saved to Photo Library successfully.")
-                
-                if self.removeAfterSavedToPhoto {
-                  let _ = VideoTrim.deleteFile(url: self.outputFile!)
+
+      // Dismiss progressAlert first, then handle result in its completion handler.
+      // iOS silently ignores a second dismiss if the first is still animating,
+      // which caused the "tap Save twice" bug for short videos.
+      DispatchQueue.main.async {
+        progressAlert.dismiss(animated: true) {
+          if ReturnCode.isSuccess(returnCode) {
+            let eventPayload: [String: Any] = ["outputPath": self.outputFile!.absoluteString, "startTime": (startTime * 1000).rounded(), "endTime": (endTime * 1000).rounded(), "duration": (videoDuration * 1000).rounded()]
+            self.emitEventToJS("onFinishTrimming", eventData: eventPayload)
+
+            if (self.saveToPhoto && isVideoType) {
+              PHPhotoLibrary.requestAuthorization { status in
+                guard status == .authorized else {
+                  self.onError(message: "Permission to access Photo Library is not granted", code: .noPhotoPermission)
+                  return
                 }
-              } else {
-                self.onError(message: "Failed to save edited video to Photo Library: \(error?.localizedDescription ?? "Unknown error")", code: .failToSaveToPhoto)
-                if self.removeAfterFailedToSavePhoto {
-                  let _ = VideoTrim.deleteFile(url: self.outputFile!)
+
+                PHPhotoLibrary.shared().performChanges({
+                  let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: self.outputFile!)
+                  request?.creationDate = Date()
+                }) { success, error in
+                  if success {
+                    print("Edited video saved to Photo Library successfully.")
+
+                    if self.removeAfterSavedToPhoto {
+                      let _ = VideoTrim.deleteFile(url: self.outputFile!)
+                    }
+                  } else {
+                    self.onError(message: "Failed to save edited video to Photo Library: \(error?.localizedDescription ?? "Unknown error")", code: .failToSaveToPhoto)
+                    if self.removeAfterFailedToSavePhoto {
+                      let _ = VideoTrim.deleteFile(url: self.outputFile!)
+                    }
+                  }
                 }
               }
+            } else if self.openDocumentsOnFinish {
+              self.saveFileToFilesApp(fileURL: self.outputFile!)
+
+              // must return otherwise editor will close
+              return
+            } else if self.openShareSheetOnFinish {
+              self.shareFile(fileURL: self.outputFile!)
+
+              // must return otherwise editor will close
+              return
+            }
+
+            if self.closeWhenFinish {
+              self.closeEditor()
+            }
+
+          } else if ReturnCode.isCancel(returnCode) {
+            // CANCEL
+            self.emitEventToJS("onCancelTrimming", eventData: nil)
+          } else {
+            // FAILURE
+            self.onError(message: "Command failed with state \(String(describing: FFmpegKitConfig.sessionState(toString: state ?? .failed))) and rc \(String(describing: returnCode)).\(String(describing: session?.getFailStackTrace()))", code: .trimmingFailed)
+            if self.closeWhenFinish {
+              self.closeEditor()
             }
           }
-        } else if self.openDocumentsOnFinish {
-          self.saveFileToFilesApp(fileURL: self.outputFile!)
-          
-          // must return otherwise editor will close
-          return
-        } else if self.openShareSheetOnFinish {
-          self.shareFile(fileURL: self.outputFile!)
-          
-          // must return otherwise editor will close
-          return
-        }
-        
-        if self.closeWhenFinish {
-          self.closeEditor(delay: 500)
-        }
-        
-      } else if ReturnCode.isCancel(returnCode) {
-        // CANCEL
-        self.emitEventToJS("onCancelTrimming", eventData: nil)
-      } else {
-        // FAILURE
-        self.onError(message: "Command failed with state \(String(describing: FFmpegKitConfig.sessionState(toString: state ?? .failed))) and rc \(String(describing: returnCode)).\(String(describing: session?.getFailStackTrace()))", code: .trimmingFailed)
-        if self.closeWhenFinish {
-          self.closeEditor(delay: 500)
         }
       }
       
